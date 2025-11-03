@@ -23,22 +23,17 @@
 <body>
     <div id="root"></div>
     
-    <!-- React and ReactDOM from CDN -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    
-    <!-- Three.js from CDN -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    
-    <!-- Babel Standalone for JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
-    <!-- Your Game Code -->
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
         
         const GoblinHunterFPS = () => {
           const mountRef = useRef(null);
+          const gameRef = useRef(null);
           const [gameState, setGameState] = useState('menu');
           const [health, setHealth] = useState(100);
           const [ammo, setAmmo] = useState({
@@ -58,13 +53,15 @@
           const weaponDamage = [15, 25, 20, 50, 15, 100];
 
           useEffect(() => {
-            if (gameState !== 'playing') return;
+            if (gameState !== 'playing' || !mountRef.current) return;
 
             const scene = new THREE.Scene();
             const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
             const renderer = new THREE.WebGLRenderer({ antialias: false });
             renderer.setSize(window.innerWidth, window.innerHeight);
             renderer.shadowMap.enabled = true;
+            
+            mountRef.current.innerHTML = '';
             mountRef.current.appendChild(renderer.domElement);
 
             const planetThemes = [
@@ -92,10 +89,10 @@
             ground.receiveShadow = true;
             scene.add(ground);
 
-            const walls = [];
             const enemies = [];
             const pickups = [];
             const secretObjects = [];
+            const projectiles = [];
 
             for (let i = 0; i < 15; i++) {
               const wallGeometry = new THREE.BoxGeometry(2, 4, 2);
@@ -111,7 +108,6 @@
               wall.castShadow = true;
               wall.receiveShadow = true;
               scene.add(wall);
-              walls.push(wall);
             }
 
             const enemyCount = level === 4 ? 1 : 5 + level * 2;
@@ -158,7 +154,6 @@
                 maxHp: hp,
                 lastShot: 0,
                 shootCooldown: enemyType === 'red' || enemyType === 'boss' ? 2000 : 0,
-                velocity: new THREE.Vector3(),
                 canShoot: enemyType === 'red' || enemyType === 'boss'
               };
               scene.add(enemy);
@@ -219,18 +214,11 @@
             }
 
             camera.position.set(0, 1.6, 0);
-            
-            const player = {
-              velocity: new THREE.Vector3(),
-              canJump: true,
-              position: camera.position,
-              direction: new THREE.Vector3(),
-              rotation: new THREE.Euler(0, 0, 0, 'YXZ')
-            };
 
             const keys = {};
             const mouse = { x: 0, y: 0 };
             let pointerLocked = false;
+            let isRunning = true;
 
             const onKeyDown = (e) => {
               keys[e.code] = true;
@@ -253,41 +241,32 @@
               mouse.y = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, mouse.y));
             };
 
-            const projectiles = [];
-            
             const shoot = () => {
               const weaponIndex = currentWeapon;
               
+              let hasAmmo = true;
+              if (weaponIndex === 1 && ammo.gasoline <= 0) hasAmmo = false;
+              if (weaponIndex === 2 && ammo.revolver <= 0) hasAmmo = false;
+              if (weaponIndex === 3 && ammo.shotgun <= 0) hasAmmo = false;
+              if (weaponIndex === 4 && ammo.ak47 <= 0) hasAmmo = false;
+              if (weaponIndex === 5 && ammo.rpg <= 0) hasAmmo = false;
+              
+              if (!hasAmmo && weaponIndex !== 0) return;
+              
               if (weaponIndex === 1) {
-                setAmmo(prev => {
-                  if (prev.gasoline <= 0) return prev;
-                  return { ...prev, gasoline: prev.gasoline - 1 };
-                });
+                setAmmo(prev => ({ ...prev, gasoline: prev.gasoline - 1 }));
               } else if (weaponIndex === 2) {
-                setAmmo(prev => {
-                  if (prev.revolver <= 0) return prev;
-                  return { ...prev, revolver: prev.revolver - 1 };
-                });
+                setAmmo(prev => ({ ...prev, revolver: prev.revolver - 1 }));
               } else if (weaponIndex === 3) {
-                setAmmo(prev => {
-                  if (prev.shotgun <= 0) return prev;
-                  return { ...prev, shotgun: prev.shotgun - 1 };
-                });
+                setAmmo(prev => ({ ...prev, shotgun: prev.shotgun - 1 }));
               } else if (weaponIndex === 4) {
-                setAmmo(prev => {
-                  if (prev.ak47 <= 0) return prev;
-                  return { ...prev, ak47: prev.ak47 - 1 };
-                });
+                setAmmo(prev => ({ ...prev, ak47: prev.ak47 - 1 }));
               } else if (weaponIndex === 5) {
-                setAmmo(prev => {
-                  if (prev.rpg <= 0) return prev;
-                  return { ...prev, rpg: prev.rpg - 1 };
-                });
+                setAmmo(prev => ({ ...prev, rpg: prev.rpg - 1 }));
               }
 
               const raycaster = new THREE.Raycaster();
               raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
-
               const intersects = raycaster.intersectObjects(enemies);
               
               if (intersects.length > 0) {
@@ -306,7 +285,8 @@
                 
                 if (hitEnemy.userData.hp <= 0) {
                   scene.remove(hitEnemy);
-                  enemies.splice(enemies.indexOf(hitEnemy), 1);
+                  const index = enemies.indexOf(hitEnemy);
+                  if (index > -1) enemies.splice(index, 1);
                   setKills(prev => prev + 1);
                   
                   if (enemies.length === 0) {
@@ -356,10 +336,9 @@
             const clock = new THREE.Clock();
             
             const animate = () => {
-              if (gameState !== 'playing') return;
+              if (!isRunning) return;
               
               const delta = clock.getDelta();
-              const time = clock.getElapsedTime();
 
               camera.rotation.order = 'YXZ';
               camera.rotation.y = mouse.x;
@@ -376,10 +355,8 @@
               direction.normalize();
               direction.applyEuler(new THREE.Euler(0, mouse.x, 0));
               
-              player.velocity.x = direction.x * speed * delta;
-              player.velocity.z = direction.z * speed * delta;
-              
-              camera.position.add(player.velocity);
+              camera.position.x += direction.x * speed * delta;
+              camera.position.z += direction.z * speed * delta;
 
               enemies.forEach(enemy => {
                 const toPlayer = new THREE.Vector3().subVectors(camera.position, enemy.position);
@@ -411,7 +388,8 @@
                 }
               });
 
-              projectiles.forEach((projectile, index) => {
+              for (let i = projectiles.length - 1; i >= 0; i--) {
+                const projectile = projectiles[i];
                 projectile.position.add(projectile.userData.velocity.clone().multiplyScalar(delta));
                 
                 if (projectile.userData.fromEnemy) {
@@ -419,17 +397,19 @@
                   if (distToPlayer < 1) {
                     setHealth(prev => Math.max(0, prev - 10));
                     scene.remove(projectile);
-                    projectiles.splice(index, 1);
+                    projectiles.splice(i, 1);
+                    continue;
                   }
                 }
                 
                 if (projectile.position.length() > 100) {
                   scene.remove(projectile);
-                  projectiles.splice(index, 1);
+                  projectiles.splice(i, 1);
                 }
-              });
+              }
 
-              pickups.forEach((pickup, index) => {
+              for (let i = pickups.length - 1; i >= 0; i--) {
+                const pickup = pickups[i];
                 const distance = pickup.position.distanceTo(camera.position);
                 if (distance < 2) {
                   const type = pickup.userData.type;
@@ -450,11 +430,11 @@
                   }
                   
                   scene.remove(pickup);
-                  pickups.splice(index, 1);
+                  pickups.splice(i, 1);
+                } else {
+                  pickup.rotation.y += delta * 2;
                 }
-                
-                pickup.rotation.y += delta * 2;
-              });
+              }
 
               secretObjects.forEach(secret => {
                 if (!secret.userData.found) {
@@ -476,9 +456,9 @@
                     pickups.push(reward);
                     
                     scene.remove(secret);
+                  } else {
+                    secret.rotation.y += delta;
                   }
-                  
-                  secret.rotation.y += delta;
                 }
               });
 
@@ -493,15 +473,13 @@
             animate();
 
             return () => {
+              isRunning = false;
               document.removeEventListener('keydown', onKeyDown);
               document.removeEventListener('keyup', onKeyUp);
               document.removeEventListener('mousemove', onMouseMove);
               document.removeEventListener('click', onClick);
               document.removeEventListener('pointerlockchange', onPointerLockChange);
               renderer.domElement.removeEventListener('wheel', onWheel);
-              if (mountRef.current) {
-                mountRef.current.removeChild(renderer.domElement);
-              }
             };
           }, [gameState, currentWeapon, health, level, planet]);
 
@@ -569,26 +547,7 @@
                     cursor: 'pointer',
                     fontFamily: 'monospace',
                     fontWeight: 'bold',
-                    boxShadow: '0 0 5px #00ff00'
-                }} />
-                <div style={{
-                  position: 'absolute',
-                  left: '50%',
-                  top: '0',
-                  bottom: '0',
-                  width: '2px',
-                  background: '#00ff00',
-                  boxShadow: '0 0 5px #00ff00'
-                }} />
-              </div>
-            </div>
-          );
-        };
-
-        ReactDOM.render(<GoblinHunterFPS />, document.getElementById('root'));
-    </script>
-</body>
-</html>: '0 0 30px #ff0000'
+                    boxShadow: '0 0 30px #ff0000'
                   }}
                 >
                   START GAME
@@ -713,7 +672,7 @@
 
                 <div style={{ textAlign: 'center' }}>
                   <div style={{ color: '#ff0000', fontSize: '2rem', fontWeight: 'bold' }}>
-                    {health}%
+                    {Math.floor(health)}%
                   </div>
                   <div style={{ color: '#ffff00', fontSize: '1.2rem' }}>
                     HEALTH
@@ -785,4 +744,23 @@
                   right: '0',
                   height: '2px',
                   background: '#00ff00',
-                  boxShadow
+                  boxShadow: '0 0 5px #00ff00'
+                }} />
+                <div style={{
+                  position: 'absolute',
+                  left: '50%',
+                  top: '0',
+                  bottom: '0',
+                  width: '2px',
+                  background: '#00ff00',
+                  boxShadow: '0 0 5px #00ff00'
+                }} />
+              </div>
+            </div>
+          );
+        };
+
+        ReactDOM.render(<GoblinHunterFPS />, document.getElementById('root'));
+    </script>
+</body>
+</html>
