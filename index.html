@@ -760,7 +760,9 @@
           );
         };
 
-        ReactDOM.render(<GoblinHunterFPS />, document.getElementById('root'));
+        const rootElement = document.getElementById('root');
+        const root = ReactDOM.createRoot(rootElement);
+        root.render(<GoblinHunterFPS />);
     </script>
 </body>
 </html>
