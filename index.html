@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Goblin Hunter - Doom Style FPS</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        body {
+            overflow: hidden;
+            font-family: 'Courier New', monospace;
+        }
+        #root {
+            width: 100vw;
+            height: 100vh;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    
+    <!-- React and ReactDOM from CDN -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Three.js from CDN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    
+    <!-- Babel Standalone for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Your Game Code -->
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+        
+        const GoblinHunterFPS = () => {
+          const mountRef = useRef(null);
+          const [gameState, setGameState] = useState('menu');
+          const [health, setHealth] = useState(100);
+          const [ammo, setAmmo] = useState({
+            gasoline: 50,
+            revolver: 24,
+            shotgun: 16,
+            ak47: 90,
+            rpg: 5
+          });
+          const [currentWeapon, setCurrentWeapon] = useState(0);
+          const [kills, setKills] = useState(0);
+          const [planet, setPlanet] = useState(1);
+          const [level, setLevel] = useState(1);
+          const [secrets, setSecrets] = useState(0);
+
+          const weapons = ['Knife', 'Chainsaw', 'Revolver', 'Shotgun', 'AK-47', 'RPG'];
+          const weaponDamage = [15, 25, 20, 50, 15, 100];
+
+          useEffect(() => {
+            if (gameState !== 'playing') return;
+
+            const scene = new THREE.Scene();
+            const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            const renderer = new THREE.WebGLRenderer({ antialias: false });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.shadowMap.enabled = true;
+            mountRef.current.appendChild(renderer.domElement);
+
+            const planetThemes = [
+              { name: 'Cave', fog: 0x1a1a2e, ambient: 0x3a3a5e, ground: 0x2d2d4d },
+              { name: 'Alien Jungle', fog: 0x1a3a1a, ambient: 0x2a4a2a, ground: 0x1a5a1a },
+              { name: 'Scary Mountain', fog: 0x2a2a3a, ambient: 0x4a4a5a, ground: 0x3a3a4a }
+            ];
+
+            const theme = planetThemes[planet - 1];
+            scene.fog = new THREE.Fog(theme.fog, 10, 50);
+            scene.background = new THREE.Color(theme.fog);
+
+            const ambientLight = new THREE.AmbientLight(theme.ambient, 0.4);
+            scene.add(ambientLight);
+
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.6);
+            directionalLight.position.set(5, 10, 5);
+            directionalLight.castShadow = true;
+            scene.add(directionalLight);
+
+            const groundGeometry = new THREE.PlaneGeometry(100, 100);
+            const groundMaterial = new THREE.MeshStandardMaterial({ color: theme.ground, roughness: 0.8 });
+            const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+            ground.rotation.x = -Math.PI / 2;
+            ground.receiveShadow = true;
+            scene.add(ground);
+
+            const walls = [];
+            const enemies = [];
+            const pickups = [];
+            const secretObjects = [];
+
+            for (let i = 0; i < 15; i++) {
+              const wallGeometry = new THREE.BoxGeometry(2, 4, 2);
+              const wallMaterial = new THREE.MeshStandardMaterial({ 
+                color: Math.random() > 0.5 ? 0x555555 : 0x666666 
+              });
+              const wall = new THREE.Mesh(wallGeometry, wallMaterial);
+              wall.position.set(
+                (Math.random() - 0.5) * 40,
+                2,
+                (Math.random() - 0.5) * 40
+              );
+              wall.castShadow = true;
+              wall.receiveShadow = true;
+              scene.add(wall);
+              walls.push(wall);
+            }
+
+            const enemyCount = level === 4 ? 1 : 5 + level * 2;
+            for (let i = 0; i < enemyCount; i++) {
+              let enemyType, color, size, hp;
+              
+              if (level === 4) {
+                enemyType = 'boss';
+                color = 0xff0000;
+                size = 3;
+                hp = 200;
+              } else {
+                const rand = Math.random();
+                if (rand < 0.5 || planet === 1) {
+                  enemyType = 'green';
+                  color = 0x00ff00;
+                  size = 1;
+                  hp = 20;
+                } else if (rand < 0.8 || planet === 2) {
+                  enemyType = 'blue';
+                  color = 0x0000ff;
+                  size = 1.5;
+                  hp = 50;
+                } else {
+                  enemyType = 'red';
+                  color = 0xff0000;
+                  size = 2;
+                  hp = 100;
+                }
+              }
+
+              const enemyGeometry = new THREE.BoxGeometry(size, size * 1.5, size);
+              const enemyMaterial = new THREE.MeshStandardMaterial({ color });
+              const enemy = new THREE.Mesh(enemyGeometry, enemyMaterial);
+              enemy.position.set(
+                (Math.random() - 0.5) * 35,
+                size * 0.75,
+                (Math.random() - 0.5) * 35
+              );
+              enemy.castShadow = true;
+              enemy.userData = { 
+                type: enemyType, 
+                hp, 
+                maxHp: hp,
+                lastShot: 0,
+                shootCooldown: enemyType === 'red' || enemyType === 'boss' ? 2000 : 0,
+                velocity: new THREE.Vector3(),
+                canShoot: enemyType === 'red' || enemyType === 'boss'
+              };
+              scene.add(enemy);
+              enemies.push(enemy);
+            }
+
+            for (let i = 0; i < 8; i++) {
+              const rand = Math.random();
+              let pickupType, color;
+              
+              if (rand < 0.3) {
+                pickupType = 'health_small';
+                color = 0xff0000;
+              } else if (rand < 0.5) {
+                pickupType = 'health_large';
+                color = 0xff3333;
+              } else if (rand < 0.7) {
+                pickupType = 'ammo';
+                color = 0xffff00;
+              } else {
+                pickupType = 'gasoline';
+                color = 0xff9900;
+              }
+
+              const pickupGeometry = new THREE.SphereGeometry(0.3, 8, 8);
+              const pickupMaterial = new THREE.MeshStandardMaterial({ 
+                color, 
+                emissive: color,
+                emissiveIntensity: 0.5
+              });
+              const pickup = new THREE.Mesh(pickupGeometry, pickupMaterial);
+              pickup.position.set(
+                (Math.random() - 0.5) * 40,
+                0.3,
+                (Math.random() - 0.5) * 40
+              );
+              pickup.userData = { type: pickupType };
+              scene.add(pickup);
+              pickups.push(pickup);
+            }
+
+            for (let i = 0; i < 3; i++) {
+              const secretGeometry = new THREE.BoxGeometry(1, 1, 1);
+              const secretMaterial = new THREE.MeshStandardMaterial({ 
+                color: 0x9900ff,
+                emissive: 0x9900ff,
+                emissiveIntensity: 0.3
+              });
+              const secret = new THREE.Mesh(secretGeometry, secretMaterial);
+              secret.position.set(
+                (Math.random() - 0.5) * 45,
+                0.5,
+                (Math.random() - 0.5) * 45
+              );
+              secret.userData = { found: false };
+              scene.add(secret);
+              secretObjects.push(secret);
+            }
+
+            camera.position.set(0, 1.6, 0);
+            
+            const player = {
+              velocity: new THREE.Vector3(),
+              canJump: true,
+              position: camera.position,
+              direction: new THREE.Vector3(),
+              rotation: new THREE.Euler(0, 0, 0, 'YXZ')
+            };
+
+            const keys = {};
+            const mouse = { x: 0, y: 0 };
+            let pointerLocked = false;
+
+            const onKeyDown = (e) => {
+              keys[e.code] = true;
+              
+              if (e.code >= 'Digit1' && e.code <= 'Digit6') {
+                const weaponIndex = parseInt(e.code.replace('Digit', '')) - 1;
+                setCurrentWeapon(weaponIndex);
+              }
+            };
+
+            const onKeyUp = (e) => {
+              keys[e.code] = false;
+            };
+
+            const onMouseMove = (e) => {
+              if (!pointerLocked) return;
+              
+              mouse.x += e.movementX * 0.002;
+              mouse.y += e.movementY * 0.002;
+              mouse.y = Math.max(-Math.PI / 2, Math.min(Math.PI / 2, mouse.y));
+            };
+
+            const projectiles = [];
+            
+            const shoot = () => {
+              const weaponIndex = currentWeapon;
+              
+              if (weaponIndex === 1) {
+                setAmmo(prev => {
+                  if (prev.gasoline <= 0) return prev;
+                  return { ...prev, gasoline: prev.gasoline - 1 };
+                });
+              } else if (weaponIndex === 2) {
+                setAmmo(prev => {
+                  if (prev.revolver <= 0) return prev;
+                  return { ...prev, revolver: prev.revolver - 1 };
+                });
+              } else if (weaponIndex === 3) {
+                setAmmo(prev => {
+                  if (prev.shotgun <= 0) return prev;
+                  return { ...prev, shotgun: prev.shotgun - 1 };
+                });
+              } else if (weaponIndex === 4) {
+                setAmmo(prev => {
+                  if (prev.ak47 <= 0) return prev;
+                  return { ...prev, ak47: prev.ak47 - 1 };
+                });
+              } else if (weaponIndex === 5) {
+                setAmmo(prev => {
+                  if (prev.rpg <= 0) return prev;
+                  return { ...prev, rpg: prev.rpg - 1 };
+                });
+              }
+
+              const raycaster = new THREE.Raycaster();
+              raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
+
+              const intersects = raycaster.intersectObjects(enemies);
+              
+              if (intersects.length > 0) {
+                const hitEnemy = intersects[0].object;
+                const damage = weaponDamage[weaponIndex];
+                
+                hitEnemy.userData.hp -= damage;
+                
+                const bloodGeometry = new THREE.SphereGeometry(0.2, 6, 6);
+                const bloodMaterial = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+                const blood = new THREE.Mesh(bloodGeometry, bloodMaterial);
+                blood.position.copy(intersects[0].point);
+                scene.add(blood);
+                
+                setTimeout(() => scene.remove(blood), 200);
+                
+                if (hitEnemy.userData.hp <= 0) {
+                  scene.remove(hitEnemy);
+                  enemies.splice(enemies.indexOf(hitEnemy), 1);
+                  setKills(prev => prev + 1);
+                  
+                  if (enemies.length === 0) {
+                    if (level === 4) {
+                      if (planet === 3) {
+                        setGameState('victory');
+                      } else {
+                        setPlanet(prev => prev + 1);
+                        setLevel(1);
+                      }
+                    } else {
+                      setLevel(prev => prev + 1);
+                    }
+                  }
+                }
+              }
+            };
+
+            const onClick = () => {
+              if (!pointerLocked) {
+                renderer.domElement.requestPointerLock();
+                return;
+              }
+              shoot();
+            };
+
+            const onPointerLockChange = () => {
+              pointerLocked = document.pointerLockElement === renderer.domElement;
+            };
+
+            const onWheel = (e) => {
+              e.preventDefault();
+              if (e.deltaY > 0) {
+                setCurrentWeapon(prev => (prev + 1) % 6);
+              } else {
+                setCurrentWeapon(prev => (prev - 1 + 6) % 6);
+              }
+            };
+
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+            document.addEventListener('mousemove', onMouseMove);
+            document.addEventListener('click', onClick);
+            document.addEventListener('pointerlockchange', onPointerLockChange);
+            renderer.domElement.addEventListener('wheel', onWheel, { passive: false });
+
+            const clock = new THREE.Clock();
+            
+            const animate = () => {
+              if (gameState !== 'playing') return;
+              
+              const delta = clock.getDelta();
+              const time = clock.getElapsedTime();
+
+              camera.rotation.order = 'YXZ';
+              camera.rotation.y = mouse.x;
+              camera.rotation.x = mouse.y;
+
+              const speed = 8;
+              const direction = new THREE.Vector3();
+              
+              if (keys['KeyW']) direction.z -= 1;
+              if (keys['KeyS']) direction.z += 1;
+              if (keys['KeyA']) direction.x -= 1;
+              if (keys['KeyD']) direction.x += 1;
+              
+              direction.normalize();
+              direction.applyEuler(new THREE.Euler(0, mouse.x, 0));
+              
+              player.velocity.x = direction.x * speed * delta;
+              player.velocity.z = direction.z * speed * delta;
+              
+              camera.position.add(player.velocity);
+
+              enemies.forEach(enemy => {
+                const toPlayer = new THREE.Vector3().subVectors(camera.position, enemy.position);
+                const distance = toPlayer.length();
+                
+                if (distance < 20) {
+                  toPlayer.normalize();
+                  enemy.position.x += toPlayer.x * delta * 2;
+                  enemy.position.z += toPlayer.z * delta * 2;
+                  
+                  if (enemy.userData.canShoot && Date.now() - enemy.userData.lastShot > enemy.userData.shootCooldown) {
+                    enemy.userData.lastShot = Date.now();
+                    
+                    const projectileGeometry = new THREE.SphereGeometry(0.2, 6, 6);
+                    const projectileMaterial = new THREE.MeshBasicMaterial({ color: 0xff6600 });
+                    const projectile = new THREE.Mesh(projectileGeometry, projectileMaterial);
+                    projectile.position.copy(enemy.position);
+                    projectile.userData = {
+                      velocity: toPlayer.clone().multiplyScalar(10),
+                      fromEnemy: true
+                    };
+                    scene.add(projectile);
+                    projectiles.push(projectile);
+                  }
+                }
+                
+                if (distance < 2) {
+                  setHealth(prev => Math.max(0, prev - 5 * delta));
+                }
+              });
+
+              projectiles.forEach((projectile, index) => {
+                projectile.position.add(projectile.userData.velocity.clone().multiplyScalar(delta));
+                
+                if (projectile.userData.fromEnemy) {
+                  const distToPlayer = projectile.position.distanceTo(camera.position);
+                  if (distToPlayer < 1) {
+                    setHealth(prev => Math.max(0, prev - 10));
+                    scene.remove(projectile);
+                    projectiles.splice(index, 1);
+                  }
+                }
+                
+                if (projectile.position.length() > 100) {
+                  scene.remove(projectile);
+                  projectiles.splice(index, 1);
+                }
+              });
+
+              pickups.forEach((pickup, index) => {
+                const distance = pickup.position.distanceTo(camera.position);
+                if (distance < 2) {
+                  const type = pickup.userData.type;
+                  
+                  if (type === 'health_small') {
+                    setHealth(prev => Math.min(100, prev + 25));
+                  } else if (type === 'health_large') {
+                    setHealth(prev => Math.min(100, prev + 50));
+                  } else if (type === 'ammo') {
+                    setAmmo(prev => ({
+                      ...prev,
+                      revolver: prev.revolver + 12,
+                      shotgun: prev.shotgun + 8,
+                      ak47: prev.ak47 + 30
+                    }));
+                  } else if (type === 'gasoline') {
+                    setAmmo(prev => ({ ...prev, gasoline: prev.gasoline + 25 }));
+                  }
+                  
+                  scene.remove(pickup);
+                  pickups.splice(index, 1);
+                }
+                
+                pickup.rotation.y += delta * 2;
+              });
+
+              secretObjects.forEach(secret => {
+                if (!secret.userData.found) {
+                  const distance = secret.position.distanceTo(camera.position);
+                  if (distance < 3) {
+                    secret.userData.found = true;
+                    setSecrets(prev => prev + 1);
+                    
+                    const rewardGeometry = new THREE.SphereGeometry(0.3, 8, 8);
+                    const rewardMaterial = new THREE.MeshStandardMaterial({ 
+                      color: 0xffff00,
+                      emissive: 0xffff00,
+                      emissiveIntensity: 0.8
+                    });
+                    const reward = new THREE.Mesh(rewardGeometry, rewardMaterial);
+                    reward.position.copy(secret.position);
+                    reward.userData = { type: 'ammo' };
+                    scene.add(reward);
+                    pickups.push(reward);
+                    
+                    scene.remove(secret);
+                  }
+                  
+                  secret.rotation.y += delta;
+                }
+              });
+
+              if (health <= 0) {
+                setGameState('dead');
+              }
+
+              renderer.render(scene, camera);
+              requestAnimationFrame(animate);
+            };
+
+            animate();
+
+            return () => {
+              document.removeEventListener('keydown', onKeyDown);
+              document.removeEventListener('keyup', onKeyUp);
+              document.removeEventListener('mousemove', onMouseMove);
+              document.removeEventListener('click', onClick);
+              document.removeEventListener('pointerlockchange', onPointerLockChange);
+              renderer.domElement.removeEventListener('wheel', onWheel);
+              if (mountRef.current) {
+                mountRef.current.removeChild(renderer.domElement);
+              }
+            };
+          }, [gameState, currentWeapon, health, level, planet]);
+
+          const startGame = () => {
+            setGameState('playing');
+            setHealth(100);
+            setAmmo({
+              gasoline: 50,
+              revolver: 24,
+              shotgun: 16,
+              ak47: 90,
+              rpg: 5
+            });
+            setCurrentWeapon(0);
+            setKills(0);
+            setPlanet(1);
+            setLevel(1);
+            setSecrets(0);
+          };
+
+          const getAmmoDisplay = () => {
+            const ammoMap = {
+              0: '∞',
+              1: ammo.gasoline,
+              2: ammo.revolver,
+              3: ammo.shotgun,
+              4: ammo.ak47,
+              5: ammo.rpg
+            };
+            return ammoMap[currentWeapon];
+          };
+
+          const getPlanetName = () => {
+            const names = ['Cave', 'Alien Jungle', 'Scary Mountain'];
+            return names[planet - 1];
+          };
+
+          if (gameState === 'menu') {
+            return (
+              <div style={{
+                width: '100vw',
+                height: '100vh',
+                background: 'linear-gradient(180deg, #1a0000 0%, #000000 100%)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontFamily: 'monospace',
+                color: '#ff0000'
+              }}>
+                <h1 style={{ fontSize: '4rem', marginBottom: '2rem', textShadow: '0 0 20px #ff0000' }}>
+                  GOBLIN HUNTER
+                </h1>
+                <p style={{ fontSize: '1.5rem', marginBottom: '3rem', color: '#ffaa00' }}>
+                  Hunt down the goblin menace across 3 deadly planets!
+                </p>
+                <button
+                  onClick={startGame}
+                  style={{
+                    padding: '20px 60px',
+                    fontSize: '2rem',
+                    background: '#ff0000',
+                    color: '#000',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontFamily: 'monospace',
+                    fontWeight: 'bold',
+                    boxShadow: '0 0 5px #00ff00'
+                }} />
+                <div style={{
+                  position: 'absolute',
+                  left: '50%',
+                  top: '0',
+                  bottom: '0',
+                  width: '2px',
+                  background: '#00ff00',
+                  boxShadow: '0 0 5px #00ff00'
+                }} />
+              </div>
+            </div>
+          );
+        };
+
+        ReactDOM.render(<GoblinHunterFPS />, document.getElementById('root'));
+    </script>
+</body>
+</html>: '0 0 30px #ff0000'
+                  }}
+                >
+                  START GAME
+                </button>
+                <div style={{ marginTop: '3rem', textAlign: 'center', color: '#888' }}>
+                  <p>WASD - Move | Mouse - Look | Click - Shoot | 1-6 - Weapons | Mouse Wheel - Switch Weapon</p>
+                </div>
+              </div>
+            );
+          }
+
+          if (gameState === 'dead') {
+            return (
+              <div style={{
+                width: '100vw',
+                height: '100vh',
+                background: 'linear-gradient(180deg, #330000 0%, #000000 100%)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontFamily: 'monospace',
+                color: '#ff0000'
+              }}>
+                <h1 style={{ fontSize: '4rem', marginBottom: '2rem', textShadow: '0 0 20px #ff0000' }}>
+                  YOU DIED
+                </h1>
+                <p style={{ fontSize: '1.5rem', marginBottom: '1rem', color: '#ffaa00' }}>
+                  Kills: {kills} | Secrets: {secrets}
+                </p>
+                <button
+                  onClick={startGame}
+                  style={{
+                    padding: '20px 60px',
+                    fontSize: '2rem',
+                    background: '#ff0000',
+                    color: '#000',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontFamily: 'monospace',
+                    fontWeight: 'bold',
+                    marginTop: '2rem'
+                  }}
+                >
+                  RESTART
+                </button>
+              </div>
+            );
+          }
+
+          if (gameState === 'victory') {
+            return (
+              <div style={{
+                width: '100vw',
+                height: '100vh',
+                background: 'linear-gradient(180deg, #003300 0%, #000000 100%)',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontFamily: 'monospace',
+                color: '#00ff00'
+              }}>
+                <h1 style={{ fontSize: '4rem', marginBottom: '2rem', textShadow: '0 0 20px #00ff00' }}>
+                  VICTORY!
+                </h1>
+                <p style={{ fontSize: '1.5rem', marginBottom: '1rem', color: '#ffaa00' }}>
+                  All planets cleared! Total Kills: {kills} | Secrets Found: {secrets}
+                </p>
+                <button
+                  onClick={startGame}
+                  style={{
+                    padding: '20px 60px',
+                    fontSize: '2rem',
+                    background: '#00ff00',
+                    color: '#000',
+                    border: 'none',
+                    cursor: 'pointer',
+                    fontFamily: 'monospace',
+                    fontWeight: 'bold',
+                    marginTop: '2rem'
+                  }}
+                >
+                  PLAY AGAIN
+                </button>
+              </div>
+            );
+          }
+
+          return (
+            <div style={{ position: 'relative', width: '100vw', height: '100vh', overflow: 'hidden' }}>
+              <div ref={mountRef} style={{ width: '100%', height: '100%' }} />
+              
+              <div style={{
+                position: 'absolute',
+                bottom: 0,
+                left: 0,
+                right: 0,
+                height: '120px',
+                background: 'linear-gradient(180deg, transparent 0%, rgba(0,0,0,0.8) 50%)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '0 40px',
+                fontFamily: 'monospace',
+                color: '#fff',
+                fontSize: '1.5rem',
+                pointerEvents: 'none'
+              }}>
+                <div style={{
+                  width: '80px',
+                  height: '80px',
+                  background: health > 75 ? '#00ff00' : health > 50 ? '#ffff00' : health > 25 ? '#ff9900' : '#ff0000',
+                  border: '3px solid #fff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '3rem'
+                }}>
+                  {health > 50 ? '😊' : health > 25 ? '😰' : '💀'}
+                </div>
+
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ color: '#ff0000', fontSize: '2rem', fontWeight: 'bold' }}>
+                    {health}%
+                  </div>
+                  <div style={{ color: '#ffff00', fontSize: '1.2rem' }}>
+                    HEALTH
+                  </div>
+                </div>
+
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ color: '#ffaa00', fontSize: '2rem', fontWeight: 'bold' }}>
+                    {getAmmoDisplay()}
+                  </div>
+                  <div style={{ color: '#ffff00', fontSize: '1.2rem' }}>
+                    AMMO
+                  </div>
+                </div>
+
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ color: '#00ffff', fontSize: '1.5rem', fontWeight: 'bold' }}>
+                    {weapons[currentWeapon]}
+                  </div>
+                  <div style={{ color: '#ffff00', fontSize: '1.2rem' }}>
+                    WEAPON
+                  </div>
+                </div>
+
+                <div style={{ textAlign: 'center' }}>
+                  <div style={{ color: '#ff00ff', fontSize: '1.5rem', fontWeight: 'bold' }}>
+                    {kills}
+                  </div>
+                  <div style={{ color: '#ffff00', fontSize: '1.2rem' }}>
+                    KILLS
+                  </div>
+                </div>
+              </div>
+
+              <div style={{
+                position: 'absolute',
+                top: '20px',
+                left: '20px',
+                fontFamily: 'monospace',
+                color: '#fff',
+                fontSize: '1.2rem',
+                textShadow: '2px 2px 4px #000',
+                pointerEvents: 'none'
+              }}>
+                <div style={{ color: '#00ffff', fontSize: '1.5rem', fontWeight: 'bold' }}>
+                  {getPlanetName()}
+                </div>
+                <div style={{ color: '#ffff00' }}>
+                  Level {level}/4 {level === 4 ? '(BOSS)' : ''}
+                </div>
+                <div style={{ color: '#ff00ff', marginTop: '10px' }}>
+                  Secrets: {secrets}
+                </div>
+              </div>
+
+              <div style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                width: '20px',
+                height: '20px',
+                pointerEvents: 'none'
+              }}>
+                <div style={{
+                  position: 'absolute',
+                  top: '50%',
+                  left: '0',
+                  right: '0',
+                  height: '2px',
+                  background: '#00ff00',
+                  boxShadow
